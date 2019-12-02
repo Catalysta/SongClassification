@@ -27,6 +27,17 @@ setwd("~/OhioState/STAT6750/StatConsultingFinal")
 #save(dat1, file = "musicdata.RData")
 load("dat.RData")
 
+#data cleaning
+summary(dat$track.genre_top)
+
+dat <- dat[which(dat$track.genre_top != ""),]
+dat <- dat[which(dat$track.genre_top != "Experimental"),]
+dat <- dat[which(dat$track.genre_top != "Instrumental"),]
+dat <- dat[which(dat$track.genre_top != "Blues"),]
+
+dat$track.genre_top = as.factor(as.character(dat$track.genre_top))
+summary(dat$track.genre_top)
+
 #train/test split
 n = length(dat[,1])
 
@@ -41,17 +52,7 @@ val.set = val.set[val_samp,]
 
 gc(remove(n, rnd_samp, val_samp))
 
-#data cleaning
-summary(train.set$track.genre_top)
-
-train <- train.set[which(train.set$track.genre_top != ""),]
-train <- train[which(train$track.genre_top != "Experimental"),]
-train <- train[which(train$track.genre_top != "Instrumental"),]
-train <- train[which(train$track.genre_top != "Blues"),]
-
-train$track.genre_top = as.factor(as.character(train$track.genre_top))
-summary(train$track.genre_top)
-
+train <- train.set
 #View(colnames(train))
 #View(head(train))
 
@@ -117,18 +118,18 @@ for (col in c(25,26,27,28,30)){
 
 #balance data by down- and up-sampling each of the 9 genres to have
 #182 members
-
+summary(train$track.genre_top)
 train2<-train[which(train$track.genre_top == "Classical"),]
 genres<- unique(train$track.genre_top)[-8]
 
 for (genre in genres){
   ind<-which(train$track.genre_top == genre)
-  if (length(ind) >= 182){
-    newind <- sample(ind,182,replace = FALSE)
+  if (length(ind) >= 192){
+    newind <- sample(ind,192,replace = FALSE)
     train2 <- rbind(train2, train[newind,])
   }
   else{
-    newind<-sample(ind,182,replace = TRUE)
+    newind<-sample(ind,192,replace = TRUE)
     train2 <- rbind(train2, train[newind,])
   }
 }
@@ -157,17 +158,54 @@ train3<-select(train2, c(audio_features.acousticness
 
 #fit random forest model with default parameters
 rf1 <- randomForest(track.genre_top ~ .
-                       , data = train3
-                       , importance = TRUE
-                       , na.action=na.roughfix)
+                    , data = train3
+                    , ntree = 1000
+                    , importance = TRUE
+                    , na.action=na.roughfix)
 
-write.csv(rf1$confusion, "output/rf1_conf.csv")
-write.csv(rf1$importance, "output/rf1_importance.csv")
+write.csv(rf1$confusion, "output/rf1trainconf.csv")
+write.csv(rf1$importance, "output/rf1trainimportance.csv")
 
 
 varImpPlot(rf1
            ,type=2
            , main = "Feature Importance for RF1 model")
+
+#Check performance on validation set
+valid <- val.set
+
+valid2<-select(valid, c(audio_features.acousticness
+                         , audio_features.danceability
+                         , audio_features.energy
+                         , audio_features.instrumentalness
+                         , audio_features.liveness
+                         , audio_features.speechiness
+                         , audio_features.tempo
+                         , audio_features.valence
+                         , social_features.artist_discovery
+                         , social_features.artist_familiarity
+                         , social_features.artist_hotttnesss
+                         , social_features.song_currency
+                         , social_features.song_hotttnesss
+                         , album.tracks
+                         , album.type
+                         , artist.latitude
+                         , artist.longitude
+                         , track.duration
+                         , track.genre_top))
+
+rf1.pred <- predict(rf1, newdata = valid2[,-19])
+
+rf1.conf <- confusionMatrix(as.factor(rf1.pred),as.factor(valid2[,19]))$table
+class.accuracy <- diag(rf1.conf)/rowSums(rf1.conf)
+rf1.conf <- cbind(rf1.conf, class.accuracy)
+
+rownames(rf1.conf) <- levels(train$track.genre_top)
+colnames(rf1.conf) <- c(rownames(rf1.conf), "class accuracy")
+write.csv(rf1.conf, "output/rf1validconf.csv")
+
+overall.accuracy <- sum(diag(rf1.conf))/sum(rf1.conf)
+#0.6948
 
 #MODEL RF2
 
@@ -177,21 +215,37 @@ colnames(train4)[519] <- "track.genre_top"
 
 #fit random forest model with default parameters
 rf2 <- randomForest(track.genre_top ~ .
-                       , data = train4
-                       , importance = TRUE
-                       , na.action=na.roughfix)
+                    , data = train4
+                    , ntree = 1000
+                    , importance = TRUE
+                    , na.action=na.roughfix)
 
-write.csv(rf2$confusion, "output/rf2_conf.csv")
-write.csv(rf2$importance, "output/rf2_importance.csv")
+write.csv(rf2$confusion, "output/rf2trainconf.csv")
+write.csv(rf2$importance, "output/rf2trainimportance.csv")
 
 
 varImpPlot(rf2
            ,type=2
            , main = "Feature Importance for RF2 model")
 
+#Check performance on validation set
+valid3<-valid[,33:550]
+
+rf2.pred <- predict(rf2, newdata = valid3)
+
+rf2.conf <- confusionMatrix(as.factor(rf2.pred),as.factor(valid[,14]))$table
+class.accuracy <- diag(rf2.conf)/rowSums(rf2.conf)
+rf2.conf <- cbind(rf2.conf, class.accuracy)
+
+rownames(rf2.conf) <- levels(train$track.genre_top)
+colnames(rf2.conf) <- c(rownames(rf2.conf), "class accuracy")
+write.csv(rf2.conf, "output/rf2validconf.csv")
+
+overall.accuracy <- sum(diag(rf2.conf))/sum(rf2.conf)
+#0.6471
+
 
 #####XG Boost#####
-
 train5<-select(train, c(audio_features.acousticness
                          , audio_features.danceability
                          , audio_features.energy
@@ -258,15 +312,22 @@ getconf <- function(probs, y, name){
 #get confusion matrix for training set predictions
 getconf(xgb1trainprobs, y=(y+1), "xgb1trainconf.csv")
 
+#get confusion matrix for validation set predictions
+y.valid <- as.numeric(valid2$track.genre_top)
+X.valid <- valid2[,1:19]
+X.valid[is.na(X.valid)] <- 0
+Xvalid <- sparse.model.matrix(track.genre_top ~ .-1, data = X.valid)
+
+#get predictions
+xgb1validprobs <- predict(xgb1,Xvalid)
+
+#convert probabilities to numeric predictions:
+getconf(xgb1validprobs,y.valid,"xgb1validconf.csv")
+
+#overall accuracy
+#0.8287
+
 #prep test data for predictions
-
-test <- test.set[which(test.set$track.genre_top != ""),]
-test <- test[which(test$track.genre_top != "Experimental"),]
-test <- test[which(test$track.genre_top != "Instrumental"),]
-test <- test[which(test$track.genre_top != "Blues"),]
-
-test$track.genre_top = as.factor(as.character(test$track.genre_top))
-
 test3<-select(test, c(audio_features.acousticness
                          , audio_features.danceability
                          , audio_features.energy
@@ -297,6 +358,10 @@ xgb1testprobs <- predict(xgb1,Xtest)
 
 #convert probabilities to numeric predictions:
 getconf(xgb1testprobs,y.test,"xgb1testconf.csv")
+
+#get feature importance
+xgb.plot.importance(xgb.importance(model = xgb1)
+                    , main = "XGB1 Feature Importance")
 
 
 #MODEL XGB2
@@ -401,8 +466,8 @@ train7<-select(train, c(audio_features.acousticness
                         , track.genre_top))
 train7 <- cbind(train7,train[,305:364]) #add only mfcc variables
 
-y3 <- as.numeric(train6$track.genre_top)-1
-X3 <- train6
+y3 <- as.numeric(train$track.genre_top)-1
+X3 <- train7
 X3[is.na(X3)] <- 0
 X3 <- sparse.model.matrix(track.genre_top ~ .-1, data = X3)
 
@@ -423,6 +488,38 @@ xgb3trainprobs <- predict(xgb3,X3train)
 
 #get confusion matrix for training set predictions
 getconf(xgb3trainprobs, y=(y3+1), "xgb3trainconf.csv")
+
+#get confusion matrix for validation set
+valid4 <- select(valid, c(audio_features.acousticness
+                          , audio_features.danceability
+                          , audio_features.energy
+                          , audio_features.instrumentalness
+                          , audio_features.liveness
+                          , audio_features.speechiness
+                          , audio_features.tempo
+                          , audio_features.valence
+                          , social_features.artist_discovery
+                          , social_features.artist_familiarity
+                          , social_features.artist_hotttnesss
+                          , social_features.song_currency
+                          , social_features.song_hotttnesss
+                          , album.tracks
+                          , album.type
+                          , artist.latitude
+                          , artist.longitude
+                          , track.duration
+                          , track.genre_top))
+valid4 <- cbind(valid4,valid[,305:364])
+y.valid <- as.numeric(valid4$track.genre_top)
+X.valid <- valid4
+X.valid[is.na(X.valid)] <- 0
+Xvalid <- sparse.model.matrix(track.genre_top ~ .-1, data = X.valid)
+
+#get predictions
+xgb3validprobs <- predict(xgb3,Xvalid)
+
+#convert probabilities to numeric predictions:
+getconf(xgb3validprobs,y.valid,"xgb3validconf.csv")
 
 #get test predictions
 test5<-select(test, c(audio_features.acousticness
