@@ -1,4 +1,6 @@
 
+set.seed(6750)
+
 setwd("C:/Users/ferjo/Documents/MS Statistics/3rd semester/STAT 6750/Project")
 
 music.data <- read.csv("audio_features.csv")
