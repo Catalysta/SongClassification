@@ -1,0 +1,9 @@
+,variable,X2 p-val,p.adj,Cramers V
+2,energy,0,0,0.409098762
+1,danceability,0.00E+00,0.00E+00,0.341246334
+8,lspeechiness,8.36E-299,6.69E-298,0.335485926
+3,instrumentalness,1.52E-147,1.22E-146,0.240156296
+6,artist_familiarity,1.13E-110,9.02E-110,0.210207594
+5,valence,4.08E-102,3.26E-101,0.202591595
+7,lliveness,4.42E-81,3.54E-80,0.182444345
+4,tempo,7.11E-58,5.69E-57,0.157014179

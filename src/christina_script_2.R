@@ -56,34 +56,114 @@ train <- train.set
 #View(colnames(train))
 #View(head(train))
 
+
+##### EDA #####
 #potential predictors: album.tracks, album.listens/time, album.type,
 #latitude, longitude, track.interest, track duration, social_features,
 #audio_features
+train2<-select(train, c(audio_features.acousticness
+                         , audio_features.danceability
+                         , audio_features.energy
+                         , audio_features.instrumentalness
+                         , audio_features.liveness
+                         , audio_features.speechiness
+                         , audio_features.tempo
+                         , audio_features.valence
+                         , social_features.artist_discovery
+                         , social_features.artist_familiarity
+                         , social_features.artist_hotttnesss
+                         , social_features.song_currency
+                         , social_features.song_hotttnesss
+                         , album.tracks
+                         , album.type
+                         , artist.latitude
+                         , artist.longitude
+                         , track.duration
+                         , track.genre_top))
 
-#do chi-squared test for all social features & audio features and 
+#Correlation plot
+train3 <- select(train2, -c(album.type
+                            , track.genre_top
+                            , artist.latitude
+                            , artist.longitude))
+
+c <- strsplit(colnames(train3),"[.]")
+colnames(train3) <- unlist(c)[c(FALSE,TRUE)]
+
+Corrlxn <-cor(train3)
+corrplot(Corrlxn, type="upper", order="hclust"
+         , col=brewer.pal(n=8, name="RdYlBu")
+         , mar = c(1,1,1,1))
+
+#examine collinear features;
+#drop acousticness, discovery, hotttnesss due to unfavorable distributions
+par(mfrow=c(3,3))
+hist(train3$acousticness, col = 'skyblue')
+hist(train3$energy, col = 'skyblue')
+hist(train3$artist_familiarity, col = 'skyblue')
+hist(train3$artist_discovery, col = 'skyblue')
+hist(train3$artist_hotttnesss, col = 'skyblue')
+hist(train3$song_currency, col = 'skyblue')
+hist(train3$song_hotttnesss, col = 'skyblue')
+
+
+#remove colinear features
+train4 <- select(train2, -c(audio_features.acousticness
+                            , social_features.artist_discovery
+                            , social_features.artist_hotttnesss
+                            , social_features.song_currency))
+
+#plot social and audio features to check for skewnewss/log transformation
+par(mfrow = c(4,3))
+for(col in c(1:10,14)){
+  label <- unlist(strsplit(colnames(train4)[col], "[.]"))[2]
+  hist(train4[,col], col = 'skyblue', main = label, xlab = label)
+}
+
+#log transform liveness, speechiness, tracks, duration
+train4$a.lliveness <- log(train4$audio_features.liveness+.Machine$double.eps)
+train4$a.lspeechiness <- log(train4$audio_features.speechiness
+                           +.Machine$double.eps)
+train4$t.lduration <- log(train4$track.duration+.Machine$double.eps)
+
+#plot transformed social and audio features
+par(mfrow = c(4,3))
+for(col in c(1:3,6:9,16:18)){
+  label <- unlist(strsplit(colnames(train4)[col], "[.]"))[2]
+  hist(train4[,col], col = 'skyblue', main = label, xlab = label)
+}
+
+train4 <- train4[,c(1:3,6:9,16:17,10:14,15)]
+
+#do chi-squared test for all features and 
 #adjust for multiple comparisons
+#also get cramer's V statistics on each of the features
+
 #create matrix to store results
-csq.results <- matrix(0, nrow = 531, ncol = 4)
+csq.results <- matrix(0, nrow = 8, ncol = 4)
 k <- 1
-for (col in 20:550){
-  if (col <=32){csq.results[k,4] <- "Echonest"}
-  else{csq.results[k,4] <- "LibROSA"}
-  label <- unlist(strsplit(colnames(train)[col], "[.]"))[2]
-  csq.results[k,1] <- colnames(train)[col]
-  temp <- table(train$track.genre_top, cut(train[,col],3)) #bin cts variables
-  csq.results[k,2] <- chisq.test(temp)$p.value
+for (col in c(1:6,8:9)){
+  #if (col <=32){csq.results[k,5] <- "Echonest"}
+  #else{csq.results[k,5] <- "LibROSA"}
+  label <- unlist(strsplit(colnames(train4)[col], "[.]"))[2]
+  csq.results[k,1] <- label #colnames(train4)[col]
+  temp <- table(train4$track.genre_top, cut(train4[,col],3)) #bin cts variables
+  test <- chisq.test(temp)
+  csq.results[k,2] <- test$p.value
+  csq.results[k,4] <- sqrt(test$statistic/(6432 * (min(9,3)-1)))
   k <- (k+1)
 }
 
 csq.results[,3] <- p.adjust(csq.results[,2], method = "bonferroni")
+colnames(csq.results) <- c("variable", "X2 p-val", "p.adj", "Cramers V")
 
-write.csv(csq.results, "output/csq.results.csv")
+write.csv(csq.results, "output/csq.results2.csv")
 
 #plot social features class conditional distributions on train set
-
-for (col in c(25,26,27,28,30)){
-    label <- colnames(train)[col]
-    plot <- ggplot(train
+par(mfrow=c(4,2))
+for (col in c(2,1,9,3,6,5,8,4)){
+    label <- colnames(train4)[col]
+    plot <- ggplot(train4
                    , aes_string(x = "track.genre_top"
                                 , y = label
                                 , fill = "track.genre_top")) +
@@ -117,44 +197,25 @@ for (col in c(25,26,27,28,30)){
 #MODEL RF1
 
 #balance data by down- and up-sampling each of the 9 genres to have
-#the median class size of 252 members
-sort(table(train$track.genre_top))
-train2<-train[which(train$track.genre_top == "Pop"),]
-genres<- unique(train$track.genre_top)[-6]
+#182 members
+summary(train$track.genre_top)
+train2<-train[which(train$track.genre_top == "Classical"),]
+genres<- unique(train$track.genre_top)[-8]
 
 for (genre in genres){
   ind<-which(train$track.genre_top == genre)
-  if (length(ind) >= 252){
-    newind <- sample(ind,252,replace = FALSE)
+  if (length(ind) >= 192){
+    newind <- sample(ind,192,replace = FALSE)
     train2 <- rbind(train2, train[newind,])
   }
   else{
-    newind<-sample(ind,252,replace = TRUE)
+    newind<-sample(ind,192,replace = TRUE)
     train2 <- rbind(train2, train[newind,])
   }
 }
 
 summary(train2$track.genre_top)
 
-train3<-select(train2, c(audio_features.acousticness
-                         , audio_features.danceability
-                         , audio_features.energy
-                         , audio_features.instrumentalness
-                         , audio_features.liveness
-                         , audio_features.speechiness
-                         , audio_features.tempo
-                         , audio_features.valence
-                         , social_features.artist_discovery
-                         , social_features.artist_familiarity
-                         , social_features.artist_hotttnesss
-                         , social_features.song_currency
-                         , social_features.song_hotttnesss
-                         , album.tracks
-                         , album.type
-                         , artist.latitude
-                         , artist.longitude
-                         , track.duration
-                         , track.genre_top))
 
 #fit random forest model with default parameters
 rf1 <- randomForest(track.genre_top ~ .
@@ -205,7 +266,7 @@ colnames(rf1.conf) <- c(rownames(rf1.conf), "class accuracy")
 write.csv(rf1.conf, "output/rf1validconf.csv")
 
 overall.accuracy <- sum(diag(rf1.conf))/sum(rf1.conf)
-#0.7053
+#0.6948
 
 #MODEL RF2
 
@@ -325,10 +386,9 @@ xgb1validprobs <- predict(xgb1,Xvalid)
 getconf(xgb1validprobs,y.valid,"xgb1validconf.csv")
 
 #overall accuracy
-#0.8309
+#0.8287
 
 #prep test data for predictions
-test <- test.set
 test3<-select(test, c(audio_features.acousticness
                          , audio_features.danceability
                          , audio_features.energy
@@ -557,20 +617,6 @@ getconf(xgb3testprobs,y3.test,"xgb3testconf.csv")
 
 
 #####Discriminant Analysis#####
-
-#Correlation plot
-train5 <- select(train3, -c(album.type
-                            , track.genre_top
-                            , artist.latitude
-                            , artist.longitude))
-
-c <- strsplit(colnames(train5),"[.]")
-colnames(train5) <- unlist(c)[c(FALSE,TRUE)]
-
-Corrlxn <-cor(train5)
-corrplot(Corrlxn, type="upper", order="hclust"
-         , col=brewer.pal(n=8, name="RdYlBu")
-         , mar = c(1,1,1,1))
 
 train6 <- select(train3, -c(social_features.artist_hotttnesss))
 
