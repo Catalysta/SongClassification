@@ -1,4 +1,4 @@
-# StatConsultingFinal
+# SongClassification
 Final Project for graduate statistical consulting course. 
 
 The main task of this project is to classify the selected music tracks from the Million Song Dataset into one of
